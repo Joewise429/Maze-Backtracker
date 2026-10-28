@@ -1,0 +1,537 @@
+<title>Maze Backtracker</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: totals on top, controls, then the maze canvas beside the live stack (top first), then the activity log. */
+:root {
+  --bg: #f2f4f1;
+  --surface: #ffffff;
+  --fg: #16211f;
+  --muted: #55655f;
+  --line: #d2dbd6;
+  --accent: #0f766e;
+  --accent-fg: #ffffff;
+  --accent-soft: #dcf0ec;
+  --top: #d9730d;
+  --top-soft: #fbe9d2;
+  --wall: #24352f;
+  --visited: #cde5df;
+  --bad: #b3261e;
+  --code-bg: #e9eeea;
+  --font-body: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1513;
+    --surface: #16201d;
+    --fg: #e5eeea;
+    --muted: #93a59e;
+    --line: #28362f;
+    --accent: #4fc4b6;
+    --accent-fg: #06231f;
+    --accent-soft: #123530;
+    --top: #f0a04b;
+    --top-soft: #3a2a12;
+    --wall: #4d625b;
+    --visited: #24413a;
+    --bad: #f28b82;
+    --code-bg: #101a17;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1513;
+  --surface: #16201d;
+  --fg: #e5eeea;
+  --muted: #93a59e;
+  --line: #28362f;
+  --accent: #4fc4b6;
+  --accent-fg: #06231f;
+  --accent-soft: #123530;
+  --top: #f0a04b;
+  --top-soft: #3a2a12;
+  --wall: #4d625b;
+  --visited: #24413a;
+  --bad: #f28b82;
+  --code-bg: #101a17;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
+
+h1 { margin: 0; font-size: clamp(26px, 4vw, 34px); line-height: 1.1; font-weight: 700; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+.top-row { display: flex; flex-wrap: wrap; gap: 20px 32px; align-items: flex-end; justify-content: space-between; }
+.top-row p { margin: 6px 0 0; color: var(--muted); max-width: 52ch; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+.stats div { display: flex; flex-direction: column; min-width: 0; }
+.stats dt { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.stats dd { margin: 0; font-size: 24px; line-height: 1.2; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stats dd.solved { color: var(--accent); }
+.stats dd.stuck { color: var(--bad); }
+
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.btn {
+  font: inherit; font-weight: 500; cursor: pointer;
+  border-radius: 6px; padding: 8px 16px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--fg);
+}
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); min-width: 84px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.field-inline { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+select { font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; }
+.spacer { flex: 1 1 0; }
+
+.board { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
+.maze-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.maze-wrap { min-width: 0; }
+canvas { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; background: var(--surface); }
+.hint { margin: 0; font-size: 13px; color: var(--muted); }
+.legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 14px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+.sw.wall { background: var(--wall); border-color: var(--wall); }
+.sw.open { background: var(--surface); }
+.sw.visited { background: var(--visited); }
+.sw.path { background: var(--accent); border-color: var(--accent); }
+.sw.top { background: var(--top); border-color: var(--top); }
+
+.stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.stack-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.stack-head small { color: var(--muted); }
+.stack ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.item {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.item .chip { font-family: var(--font-body); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; color: var(--muted); }
+.item.top { border-color: var(--top); background: var(--top-soft); }
+.item.top .chip { color: var(--top); }
+.item.bottom .chip { color: var(--accent); }
+.more { font-size: 13px; color: var(--muted); padding: 2px 12px; }
+.base { font-size: 12px; color: var(--muted); }
+
+.panel { display: flex; flex-direction: column; gap: 12px; }
+.log { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); max-height: 230px; overflow-y: auto; }
+.log li { padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+.log li:last-child { border-bottom: 0; }
+
+@media (max-width: 760px) {
+  .board { grid-template-columns: minmax(0, 1fr); }
+  .spacer { display: none; }
+}
+</style>
+
+<div class="page">
+  <header class="top-row">
+    <div>
+      <h1>Maze Backtracker</h1>
+      <p>A maze solver that remembers its path on a stack. Each move pushes a cell. At a dead end it pops the cell and backs up to the last place where it had another choice.</p>
+    </div>
+    <dl class="stats" aria-label="Search totals">
+      <div><dt>Stack size</dt><dd id="s-stack">0</dd></div>
+      <div><dt>Cells explored</dt><dd id="s-seen">0</dd></div>
+      <div><dt>Backtracks</dt><dd id="s-back">0</dd></div>
+      <div><dt>Status</dt><dd id="s-status">Ready</dd></div>
+    </dl>
+  </header>
+
+  <section class="controls" aria-label="Controls">
+    <button class="btn primary" id="btn-run" type="button">Run</button>
+    <button class="btn" id="btn-step" type="button">Step</button>
+    <button class="btn" id="btn-restart" type="button">Restart</button>
+    <span class="spacer"></span>
+    <label class="field-inline" for="speed">Speed
+      <select id="speed">
+        <option value="250:1">Slow</option>
+        <option value="70:1" selected>Normal</option>
+        <option value="20:3">Fast</option>
+      </select>
+    </label>
+    <label class="field-inline" for="size">Maze size
+      <select id="size">
+        <option value="11">Small</option>
+        <option value="15" selected>Medium</option>
+        <option value="21">Large</option>
+        <option value="31">Huge</option>
+      </select>
+    </label>
+    <button class="btn" id="btn-new" type="button">New maze</button>
+  </section>
+
+  <section class="board" aria-label="Maze and stack">
+    <div class="maze-col">
+      <div class="maze-wrap" id="wrap">
+        <canvas id="maze" role="img" aria-label="The maze. The start is at the top left and the goal at the bottom right."></canvas>
+      </div>
+      <ul class="legend" aria-label="Legend">
+        <li><span class="sw wall"></span>Wall</li>
+        <li><span class="sw open"></span>Unexplored</li>
+        <li><span class="sw visited"></span>Dead end (popped)</li>
+        <li><span class="sw path"></span>On the stack</li>
+        <li><span class="sw top"></span>Top of the stack</li>
+      </ul>
+      <p class="hint">Click any inner cell to add or remove a wall and the search restarts. Block the route completely to see the stack run empty.</p>
+    </div>
+
+    <aside class="stack" aria-label="The stack">
+      <div class="stack-head"><h2>The stack</h2><small>(row, column)</small></div>
+      <ol id="stack-list" aria-label="Stack, top first"></ol>
+      <div class="base">The bottom of the stack is the start cell.</div>
+    </aside>
+  </section>
+
+  <section class="panel" aria-label="Activity">
+    <h2>Activity</h2>
+    <ul class="log" id="log" aria-live="polite"></ul>
+  </section>
+</div>
+
+<script>
+class Stack {
+  constructor() {
+    this.items = [];
+  }
+  push(item) {
+    this.items.push(item);
+  }
+  pop() {
+    return this.items.length ? this.items.pop() : null;
+  }
+  peek() {
+    return this.items.length ? this.items[this.items.length - 1] : null;
+  }
+  isEmpty() {
+    return this.items.length === 0;
+  }
+  get size() {
+    return this.items.length;
+  }
+  toArray() {
+    return this.items.slice();
+  }
+}
+
+// Order the solver tries moves: down, right, up, left.
+const MOVES = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+
+class MazeSolver {
+  constructor(grid, start, goal) {
+    this.grid = grid;
+    this.n = grid.length;
+    this.start = start;
+    this.goal = goal;
+    this.reset();
+  }
+  key(r, c) {
+    return r * this.n + c;
+  }
+  reset() {
+    this.stack = new Stack();
+    this.visited = new Set();
+    this.onStack = new Set();
+    this.backtracks = 0;
+    this.status = 'ready';
+    this.stack.push(this.start);
+    this.visited.add(this.key(this.start[0], this.start[1]));
+    this.onStack.add(this.key(this.start[0], this.start[1]));
+  }
+  get finished() {
+    return this.status === 'solved' || this.status === 'stuck';
+  }
+  // One move: push a new cell, or pop at a dead end. Returns a message.
+  step() {
+    if (this.finished) return null;
+    this.status = 'running';
+    const top = this.stack.peek();
+    const r = top[0], c = top[1];
+    for (let i = 0; i < MOVES.length; i++) {
+      const nr = r + MOVES[i][0], nc = c + MOVES[i][1];
+      if (nr < 0 || nc < 0 || nr >= this.n || nc >= this.n) continue;
+      if (this.grid[nr][nc] !== 0) continue;
+      const k = this.key(nr, nc);
+      if (this.visited.has(k)) continue;
+      this.visited.add(k);
+      this.onStack.add(k);
+      this.stack.push([nr, nc]);
+      if (nr === this.goal[0] && nc === this.goal[1]) {
+        this.status = 'solved';
+        return 'Pushed (' + nr + ', ' + nc + '). That is the goal. The stack now holds the path: ' + this.stack.size + ' cells.';
+      }
+      return 'Pushed (' + nr + ', ' + nc + ').';
+    }
+    const popped = this.stack.pop();
+    this.onStack.delete(this.key(popped[0], popped[1]));
+    this.backtracks++;
+    if (this.stack.isEmpty()) {
+      this.status = 'stuck';
+      return 'Dead end at (' + r + ', ' + c + '). The stack is empty, so there is no path to the goal.';
+    }
+    const back = this.stack.peek();
+    return 'Dead end at (' + r + ', ' + c + '). Popped it and backed up to (' + back[0] + ', ' + back[1] + ').';
+  }
+}
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Builds a maze by carving passages with a stack of its own. 1 = wall, 0 = open.
+function generateMaze(n, rand) {
+  const grid = [];
+  for (let r = 0; r < n; r++) grid.push(new Array(n).fill(1));
+  const stack = new Stack();
+  grid[1][1] = 0;
+  stack.push([1, 1]);
+  const dirs = [[0, 2], [2, 0], [0, -2], [-2, 0]];
+  while (!stack.isEmpty()) {
+    const cur = stack.peek();
+    const r = cur[0], c = cur[1];
+    const opts = dirs.filter(function (d) {
+      const nr = r + d[0], nc = c + d[1];
+      return nr > 0 && nc > 0 && nr < n - 1 && nc < n - 1 && grid[nr][nc] === 1;
+    });
+    if (!opts.length) { stack.pop(); continue; }
+    const d = opts[Math.floor(rand() * opts.length)];
+    grid[r + d[0] / 2][c + d[1] / 2] = 0;
+    grid[r + d[0]][c + d[1]] = 0;
+    stack.push([r + d[0], c + d[1]]);
+  }
+  return grid;
+}
+
+(function () {
+  var n = 15;
+  var grid, solver, goal;
+  var start = [1, 1];
+  var running = false;
+  var timer = null;
+  var logLines = [];
+
+  var canvas = document.getElementById('maze');
+  var ctx = canvas.getContext('2d');
+
+  function $(id) { return document.getElementById(id); }
+  function speedCfg() {
+    var p = $('speed').value.split(':');
+    return { delay: parseInt(p[0], 10), steps: parseInt(p[1], 10) };
+  }
+  function log(text) {
+    logLines.unshift(text);
+    if (logLines.length > 40) logLines.pop();
+  }
+
+  function setMaze(size, seed) {
+    stopRun();
+    n = size;
+    grid = generateMaze(n, mulberry32(seed));
+    goal = [n - 2, n - 2];
+    solver = new MazeSolver(grid, start, goal);
+    logLines = [];
+  }
+
+  function doStep() {
+    var msg = solver.step();
+    if (msg) log(msg);
+  }
+
+  function stopRun() {
+    running = false;
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+
+  function tick() {
+    timer = null;
+    if (!running) return;
+    var cfg = speedCfg();
+    for (var i = 0; i < cfg.steps && !solver.finished; i++) doStep();
+    if (solver.finished) running = false;
+    render();
+    if (running) timer = setTimeout(tick, cfg.delay);
+  }
+
+  function color(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function draw() {
+    var wrap = $('wrap');
+    var avail = Math.max(wrap.clientWidth, n * 8);
+    var cs = Math.max(8, Math.floor(Math.min(avail, 600) / n));
+    var size = cs * n;
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = size + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    var cWall = color('--wall'), cOpen = color('--surface'), cSeen = color('--visited');
+    var cPath = color('--accent'), cTop = color('--top'), cFg = color('--fg'), cOnPath = color('--accent-fg');
+    var topCell = solver.stack.peek();
+
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        var k = r * n + c;
+        var fill = cOpen;
+        if (grid[r][c] === 1) fill = cWall;
+        else if (solver.onStack.has(k)) fill = cPath;
+        else if (solver.visited.has(k)) fill = cSeen;
+        ctx.fillStyle = fill;
+        ctx.fillRect(c * cs, r * cs, cs, cs);
+      }
+    }
+    if (topCell) {
+      ctx.fillStyle = cTop;
+      ctx.fillRect(topCell[1] * cs, topCell[0] * cs, cs, cs);
+    }
+    // Goal outline so it stays visible before it is reached.
+    ctx.strokeStyle = cTop;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(goal[1] * cs + 1, goal[0] * cs + 1, cs - 2, cs - 2);
+
+    ctx.font = '500 ' + Math.floor(cs * 0.55) + 'px "IBM Plex Mono", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = cOnPath;
+    ctx.fillText('S', start[1] * cs + cs / 2, start[0] * cs + cs / 2 + 1);
+    var goalOnTop = topCell && topCell[0] === goal[0] && topCell[1] === goal[1];
+    ctx.fillStyle = goalOnTop ? cOnPath : cTop;
+    ctx.fillText('G', goal[1] * cs + cs / 2, goal[0] * cs + cs / 2 + 1);
+  }
+
+  var STATUS = { ready: 'Ready', running: 'Searching', solved: 'Solved', stuck: 'No path' };
+  var MAX_SHOWN = 12;
+
+  function render() {
+    $('s-stack').textContent = solver.stack.size;
+    $('s-seen').textContent = solver.visited.size;
+    $('s-back').textContent = solver.backtracks;
+    var st = $('s-status');
+    st.textContent = STATUS[solver.status];
+    st.className = solver.status === 'solved' ? 'solved' : solver.status === 'stuck' ? 'stuck' : '';
+
+    var list = $('stack-list');
+    list.replaceChildren();
+    var arr = solver.stack.toArray().reverse();
+    if (!arr.length) {
+      var e = document.createElement('li');
+      e.className = 'more';
+      e.textContent = 'The stack is empty.';
+      list.append(e);
+    }
+    arr.slice(0, MAX_SHOWN).forEach(function (cell, i) {
+      var li = document.createElement('li');
+      var isBottom = i === arr.length - 1;
+      li.className = 'item' + (i === 0 ? ' top' : '') + (isBottom ? ' bottom' : '');
+      var coord = document.createElement('span');
+      coord.textContent = '(' + cell[0] + ', ' + cell[1] + ')';
+      var chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = i === 0 ? 'Top' : isBottom ? 'Start' : '';
+      li.append(coord, chip);
+      list.append(li);
+    });
+    if (arr.length > MAX_SHOWN) {
+      var more = document.createElement('li');
+      more.className = 'more';
+      more.textContent = '+ ' + (arr.length - MAX_SHOWN) + ' more below, down to the start';
+      list.append(more);
+    }
+
+    $('btn-run').textContent = running ? 'Pause' : 'Run';
+    $('btn-run').disabled = solver.finished;
+    $('btn-step').disabled = solver.finished;
+
+    var logEl = $('log');
+    logEl.replaceChildren();
+    logLines.forEach(function (text) {
+      var li = document.createElement('li');
+      li.textContent = text;
+      logEl.append(li);
+    });
+
+    draw();
+  }
+
+  $('btn-run').addEventListener('click', function () {
+    if (running) { stopRun(); render(); return; }
+    if (solver.finished) return;
+    running = true;
+    render();
+    tick();
+  });
+  $('btn-step').addEventListener('click', function () {
+    stopRun();
+    doStep();
+    render();
+  });
+  $('btn-restart').addEventListener('click', function () {
+    stopRun();
+    solver.reset();
+    logLines = [];
+    log('Search restarted on the same maze.');
+    render();
+  });
+  $('btn-new').addEventListener('click', function () {
+    setMaze(parseInt($('size').value, 10), Math.floor(Math.random() * 1e9) + 1);
+    log('New maze generated. Press Run or Step.');
+    render();
+  });
+  $('size').addEventListener('change', function () {
+    setMaze(parseInt($('size').value, 10), Math.floor(Math.random() * 1e9) + 1);
+    log('New maze generated. Press Run or Step.');
+    render();
+  });
+  $('speed').addEventListener('change', function () {
+    if (running) { clearTimeout(timer); timer = setTimeout(tick, speedCfg().delay); }
+  });
+
+  canvas.addEventListener('click', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var c = Math.floor((e.clientX - rect.left) / rect.width * n);
+    var r = Math.floor((e.clientY - rect.top) / rect.height * n);
+    if (r < 1 || c < 1 || r > n - 2 || c > n - 2) return;
+    if ((r === start[0] && c === start[1]) || (r === goal[0] && c === goal[1])) return;
+    stopRun();
+    grid[r][c] = grid[r][c] === 1 ? 0 : 1;
+    solver.reset();
+    logLines = [];
+    log((grid[r][c] === 1 ? 'Wall added at (' : 'Wall removed at (') + r + ', ' + c + '). Search restarted.');
+    render();
+  });
+
+  window.addEventListener('resize', draw);
+  try {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+  } catch (err) { /* older browsers: theme change shows on next redraw */ }
+  new MutationObserver(draw).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // Example start: a medium maze with the search already part way through.
+  setMaze(15, 80);
+  log('Example maze loaded. Press Run, or Step one move at a time.');
+  for (var i = 0; i < 80 && !solver.finished; i++) doStep();
+  render();
+})();
+</script>
